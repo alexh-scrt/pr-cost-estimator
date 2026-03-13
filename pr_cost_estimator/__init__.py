@@ -12,14 +12,22 @@ Typical usage::
     analysis = analyze_diff(diff_text)
     estimates = estimate_costs(analysis)
     generate_report(estimates)
+
+Programmatic model listing::
+
+    from pr_cost_estimator import list_models
+
+    for model in list_models():
+        print(model.display_name, model.input_cost_per_million_tokens)
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
-    pass
+    from pr_cost_estimator.cost_models import ModelCostEstimate, ModelPricing
+    from pr_cost_estimator.diff_analyzer import DiffAnalysis
 
 __version__ = "0.1.0"
 __all__ = [
@@ -29,6 +37,7 @@ __all__ = [
     "generate_report",
     "get_advice",
     "fetch_github_pr_diff",
+    "list_models",
 ]
 
 
@@ -39,8 +48,9 @@ def analyze_diff(diff_text: str) -> "DiffAnalysis":
         diff_text: Raw unified diff content as a string.
 
     Returns:
-        A DiffAnalysis dataclass containing file counts, line counts,
-        file types, and complexity heuristics.
+        A :class:`~pr_cost_estimator.diff_analyzer.DiffAnalysis` dataclass
+        containing file counts, line counts, file types, and complexity
+        heuristics.
     """
     from pr_cost_estimator.diff_analyzer import DiffAnalyzer
 
@@ -48,14 +58,18 @@ def analyze_diff(diff_text: str) -> "DiffAnalysis":
     return analyzer.analyze(diff_text)
 
 
-def estimate_costs(analysis: "DiffAnalysis") -> list["ModelCostEstimate"]:
+def estimate_costs(
+    analysis: "DiffAnalysis",
+) -> List["ModelCostEstimate"]:
     """Compute per-model cost estimates from a diff analysis.
 
     Args:
-        analysis: A DiffAnalysis object produced by analyze_diff().
+        analysis: A :class:`~pr_cost_estimator.diff_analyzer.DiffAnalysis`
+            object produced by :func:`analyze_diff`.
 
     Returns:
-        A list of ModelCostEstimate objects, one per supported AI model.
+        A list of :class:`~pr_cost_estimator.cost_models.ModelCostEstimate`
+        objects, one per supported AI model, sorted by ascending total cost.
     """
     from pr_cost_estimator.cost_models import CostCalculator
     from pr_cost_estimator.token_counter import TokenCounter
@@ -67,18 +81,23 @@ def estimate_costs(analysis: "DiffAnalysis") -> list["ModelCostEstimate"]:
 
 
 def generate_report(
-    estimates: list["ModelCostEstimate"],
+    estimates: List["ModelCostEstimate"],
     output_format: str = "table",
-    output_file: str | None = None,
+    output_file: Optional[str] = None,
 ) -> None:
     """Format and print cost estimates as a Rich table or JSON.
 
     Args:
-        estimates: List of ModelCostEstimate objects from estimate_costs().
+        estimates: List of
+            :class:`~pr_cost_estimator.cost_models.ModelCostEstimate`
+            objects from :func:`estimate_costs`.
         output_format: Either ``"table"`` for Rich terminal output or
             ``"json"`` for machine-readable output.
-        output_file: Optional file path to write output to; if None,
+        output_file: Optional file path to write output to; if ``None``,
             writes to stdout.
+
+    Raises:
+        ValueError: If ``output_format`` is not ``'table'`` or ``'json'``.
     """
     from pr_cost_estimator.reporter import Reporter
 
@@ -87,28 +106,32 @@ def generate_report(
 
 
 def get_advice(
-    estimates: list["ModelCostEstimate"],
+    estimates: List["ModelCostEstimate"],
     threshold_usd: float = 5.0,
-) -> list[str]:
+) -> List[str]:
     """Return advisory messages when estimated cost exceeds a threshold.
 
     Args:
-        estimates: List of ModelCostEstimate objects from estimate_costs().
+        estimates: List of
+            :class:`~pr_cost_estimator.cost_models.ModelCostEstimate`
+            objects from :func:`estimate_costs`.
         threshold_usd: Dollar threshold above which advice is triggered.
+            Defaults to ``5.0``.
 
     Returns:
-        A list of human-readable suggestion strings, or an empty list
-        if all estimates are below the threshold.
+        A list of human-readable suggestion title strings, or an empty
+        list if all estimates are below the threshold.
     """
     from pr_cost_estimator.advisor import Advisor
 
     advisor = Advisor(threshold_usd=threshold_usd)
-    return advisor.advise(estimates)
+    suggestions = advisor.advise(estimates)
+    return [s.title for s in suggestions]
 
 
 def fetch_github_pr_diff(
     pr_url: str,
-    github_token: str | None = None,
+    github_token: Optional[str] = None,
 ) -> str:
     """Fetch a pull request diff from the GitHub REST API.
 
@@ -122,10 +145,23 @@ def fetch_github_pr_diff(
         Raw unified diff text as a string.
 
     Raises:
-        ValueError: If the URL format is not a recognizable GitHub PR URL.
+        ValueError: If the URL format is not a recognisable GitHub PR URL.
         requests.HTTPError: If the GitHub API returns a non-2xx response.
     """
     from pr_cost_estimator.github_fetcher import GitHubFetcher
 
     fetcher = GitHubFetcher(token=github_token)
     return fetcher.fetch_diff(pr_url)
+
+
+def list_models() -> List["ModelPricing"]:
+    """Return all supported AI models sorted by ascending input cost.
+
+    Returns:
+        List of :class:`~pr_cost_estimator.cost_models.ModelPricing` objects,
+        cheapest first.
+    """
+    from pr_cost_estimator.cost_models import CostCalculator
+
+    calc = CostCalculator()
+    return calc.list_models()
